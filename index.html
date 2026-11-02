@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>مجلس الطلاب</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap">
+<style>
+:root{--p:#14284b;--gold:#c9a227;--bg:#f7f3ea;--card:#fffdf8;--tx:#1d1d1f;--mu:#6b6b6b;--bd:#e6dccb}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1424;--card:#171f33;--tx:#f1ece0;--mu:#a7a9b5;--bd:#2a3350;--p:#22386a;--gold:#e0c060}}
+body{font-family:Cairo,Tahoma,Arial,sans-serif;background:var(--bg);color:var(--tx);margin:0;padding-bottom:20px;background-image:radial-gradient(circle at 10% 0,rgba(201,162,39,.10),transparent 40%)}
+h1,h2,h3,h4{color:var(--p);font-weight:900}
+h3{border-inline-start:4px solid var(--gold);padding-inline-start:10px}
+header{background:linear-gradient(135deg,var(--p),#0b1830);color:#fff;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;border-bottom:3px solid var(--gold);box-shadow:0 4px 16px rgba(0,0,0,.15)}
+header button{background:transparent;border:1px solid #fff}
+main{max-width:800px;margin:20px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--bd);border-top:3px solid var(--gold);border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 6px 18px rgba(20,40,75,.06)}
+input,textarea{width:100%;padding:8px;margin:6px 0;box-sizing:border-box;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font-family:inherit}
+button{background:linear-gradient(135deg,var(--p),#2b4f86);color:#fff;border:0;padding:9px 16px;border-radius:999px;cursor:pointer;margin-top:4px;font-family:inherit;font-weight:700}
+button.sm{padding:3px 8px;font-size:.85em}
+.mu{color:var(--mu);font-size:.9em}
+.msg{background:#fff3cd;color:#222;padding:10px;border-radius:6px;margin-bottom:12px}
+.cm{border-top:1px solid var(--bd);padding:8px 0}
+.hid{color:var(--mu);font-style:italic}
+.lnk{color:var(--p);cursor:pointer;text-decoration:underline}
+.bar{background:var(--bd);border-radius:4px;height:10px;margin:4px 0 10px}
+.bar>div{background:var(--gold);height:10px;border-radius:4px}
+</style>
+</head>
+<body>
+<header><img src="/_blob/19fa2b15600654db811363cd200a1d61" alt="شعار مجلس الطلاب" style="height:72px;max-width:60%;background:#fff;border-radius:8px;padding:4px"><nav id="nav"></nav></header>
+<main><div id="msg"></div><div id="app"></div></main>
+
+<script>
+const KEY = "council-preview-v2";
+let note = "";
+let view = { name: "home" };
+
+function seed() {
+  return {
+    invites: [
+      { h: "2a5a736fa1a5256d3ff65ba7e35b6d9dc880ff61e3a0c0437024d34b987b0bb0", name: "حمدي", role: "president", used: false },
+      { h: "5182526355a6cc11bba1fd61782b5377705c49f7d2839e8b15a7eea600673205", name: "جود", role: "deputy", used: false, owner: true },
+      { h: "", name: "تجريبي - طالب", role: "student", used: false }
+    ],
+    users: [], news: [], polls: [], comments: [], votes: [], councils: [], session: null, nid: 1
+  };
+}
+function load() {
+  try { const r = localStorage.getItem(KEY); if (r) return JSON.parse(r); } catch (e) {}
+  return seed();
+}
+let S = load();
+S.councils = S.councils || [];
+S.requests = S.requests || [];
+S.users.forEach(u => { if (u.role === "deputy") u.owner = true; });
+let DB = null;
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+function nid() { return S.nid++; }
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function me() { return S.users.find(u => u.id === S.session) || null; }
+function staff(u) { return !!u && (u.role === "president" || u.role === "deputy"); }
+function roleName(r) { return { president: "الرئيسة", deputy: "نائب الرئيسة", student: "طالب" }[r] || ""; }
+function fmt(d) { return new Date(d).toLocaleDateString("ar-EG"); }
+function fmtT(d) { return new Date(d).toLocaleString("ar-EG"); }
+
+function go(name, id) { view = { name, id }; note = ""; render(); window.scrollTo(0, 0); }
+function say(t) { note = t; render(); }
+
+function render() {
+  const u = me();
+  document.getElementById("nav").innerHTML = u
+    ? `<span>${esc(u.name)} (${roleName(u.role)})</span> ${staff(u) ? `<button onclick="go('councils')">مجالس الصفوف</button>` : ""} ${staff(u) ? `<button onclick="go('requests')">طلبات الصفوف</button>` : ""} <button onclick="go('home')">الرئيسية</button> <button onclick="logout()">خروج</button>`
+    : `<button onclick="go('login')">دخول</button> <button onclick="go('register')">تفعيل حساب</button>`;
+  const views = { home, login: loginView, register: registerView, news: newsView, poll: pollView, councils: councilsView, requests: requestsView };
+  document.getElementById("msg").innerHTML = note ? `<div class="msg">${esc(note)}</div>` : "";
+  note = "";
+  document.getElementById("app").innerHTML = (views[view.name] || home)() +
+    `<p style="text-align:center"><button class="sm" onclick="resetDemo()">إعادة ضبط البيانات التجريبية</button></p>`;
+}
+
+// ---------- الصفحات ----------
+
+function home() {
+  let h = "";
+  if (staff(me())) {
+    h += `<div class="card"><h3>نشر خبر</h3><form onsubmit="postNews(event)">
+      <input name="title" maxlength="200" placeholder="العنوان" required>
+      <textarea name="body" rows="4" maxlength="5000" placeholder="المحتوى" required></textarea>
+      <button>نشر</button></form></div>
+      <div class="card"><h3>فتح تصويت</h3><form onsubmit="createPoll(event)">
+      <input name="question" maxlength="300" placeholder="السؤال" required>
+      <textarea name="options" rows="4" placeholder="كل خيار في سطر منفصل" required></textarea>
+      <button>فتح التصويت</button></form></div>`;
+  }
+  h += "<h3>الأخبار</h3>";
+  h += S.news.length
+    ? S.news.map(n => `<div class="card"><span class="lnk" onclick="go('news',${n.id})"><strong>${esc(n.title)}</strong></span>
+        <div class="mu">${fmt(n.created)} — ${esc(n.author)}</div></div>`).join("")
+    : `<p class="mu">لا توجد أخبار بعد</p>`;
+  h += "<h3>التصويتات</h3>";
+  h += S.polls.length
+    ? S.polls.map(p => `<div class="card"><span class="lnk" onclick="go('poll',${p.id})"><strong>${esc(p.q)}</strong></span>
+        <span class="mu"> — ${p.open ? "مفتوح" : "مغلق"}</span></div>`).join("")
+    : `<p class="mu">لا توجد تصويتات بعد</p>`;
+  return h;
+}
+
+function requestsView() {
+  const u = me();
+  if (!staff(u)) return `<div class="card"><p>هذه الصفحة للرئيسة والنائب فقط.</p></div>`;
+  const form = S.councils.length ? `<div class="card"><h3>رفع طلب من مجلس صف</h3><form onsubmit="submitRequest(event)">
+    <select name="cid">${S.councils.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>
+    <input name="title" maxlength="150" placeholder="عنوان الطلب" required>
+    <textarea name="body" rows="3" maxlength="1000" placeholder="تفاصيل الطلب" required></textarea>
+    <button>رفع الطلب</button></form></div>` : `<p class="mu">أنشئي مجلس صف أولاً</p>`;
+  const labels = { pending: "بانتظار القرار", accepted: "مقبول", postponed: "مؤجل", rejected: "مرفوض" };
+  const list = S.requests.map(r => {
+    const c = S.councils.find(x => x.id === r.cid);
+    const decide = u.owner && r.status === "pending" ? `<form onsubmit="decideRequest(event,${r.id})">
+      <select name="d"><option value="accepted">قبول</option><option value="postponed">تأجيل</option><option value="rejected">رفض</option></select>
+      <input name="note" maxlength="200" placeholder="ملاحظة (اختيارية)"><button>حفظ القرار</button></form>` : "";
+    return `<div class="card"><strong>${esc(r.title)}</strong> <span class="mu">— ${c ? esc(c.name) : "مجلس محذوف"} — ${labels[r.status]}</span>
+      <p>${esc(r.body)}</p>${r.note ? `<p class="mu">ملاحظة المالك: ${esc(r.note)}</p>` : ""}${decide}</div>`;
+  }).join("");
+  return `<h2>طلبات الصفوف</h2>` + form + (list || `<p class="mu">لا توجد طلبات بعد</p>`);
+}
+function submitRequest(e) {
+  e.preventDefault();
+  if (!staff(me())) return;
+  const f = new FormData(e.target);
+  const title = f.get("title").trim().slice(0, 150);
+  const body = f.get("body").trim().slice(0, 1000);
+  if (!title || !body) return say("أكملي الحقول");
+  S.requests.unshift({ id: nid(), cid: Number(f.get("cid")), title, body, status: "pending", note: "", by: me().name });
+  saveRequests();
+  render();
+}
+function decideRequest(e, id) {
+  e.preventDefault();
+  const u = me();
+  if (!u || !u.owner) return;
+  const f = new FormData(e.target);
+  const r = S.requests.find(x => x.id === id);
+  if (!r || r.status !== "pending") return;
+  r.status = f.get("d");
+  r.note = f.get("note").trim().slice(0, 200);
+  saveRequests();
+  render();
+}
+function saveRequests() {
+  if (!DB) { say("الحفظ المشترك غير متاح الآن"); return; }
+  DB.doc("shared/requests").set({ list: S.requests }).catch(() => say("تعذر الحفظ، حاولي مرة أخرى"));
+}
+const RANKS = { president: "رئيس", deputy: "نائب", top: "إدارة عليا" };
+function canDelete(u) {
+  return !!u && (u.owner || u.supreme);
+}
+function councilsView() {
+  if (!staff(me())) return `<div class="card"><p>هذه الصفحة للرئيسة والنائب فقط.</p></div>`;
+  const form = `<div class="card"><h3>إنشاء مجلس صف</h3><form onsubmit="createCouncil(event)">
+    <input name="name" maxlength="60" placeholder="اسم الصف، مثل: الصف التاسع أ" required>
+    <input name="admin" maxlength="60" placeholder="اسم مسؤولة أو مسؤول المجلس (اختياري)">
+    ${me().owner ? `<select name="rank"><option value="president">رئيس</option><option value="deputy">نائب</option><option value="top">إدارة عليا</option></select>` : `<p class="mu">الرتبة يحددها مالك الموقع</p>`}
+    <label class="mu">لون المجلس</label>
+    <input name="color" type="color" value="#c0492b" style="height:44px;padding:4px">
+    <button>إنشاء المجلس</button></form></div>`;
+  const list = S.councils.length
+    ? S.councils.map(c => `<div class="card" style="border-top:4px solid ${c.color}">
+        <strong>${esc(c.name)}</strong> <span style="border:1px solid var(--p);padding:2px 8px;border-radius:999px;font-size:13px">${RANKS[c.rank] || "بانتظار تحديد الرتبة"}</span> <span class="mu">— ${c.admin ? esc(c.admin) : "بدون مسؤول بعد"}</span>
+        ${canDelete(me()) ? `<div><button onclick="removeCouncil(${c.id})" style="background:transparent;color:var(--tx);border:1px solid var(--bd)">حذف</button></div>`:""}</div>`).join("")
+    : `<p class="mu">لا توجد مجالس صفوف بعد</p>`;
+  return `<h2>مجالس الصفوف</h2>` + form + list;
+}
+function createCouncil(e) {
+  e.preventDefault();
+  if (!staff(me())) return say("غير مسموح");
+  const f = new FormData(e.target);
+  const name = f.get("name").trim().slice(0, 60);
+  if (!name) return say("أدخلي اسم الصف");
+  if (S.councils.some(c => c.name === name)) return say("يوجد مجلس لهذا الصف بالفعل");
+  S.councils.unshift({ id: nid(), name, admin: f.get("admin").trim().slice(0, 60), color: f.get("color"), rank: f.get("rank") || "" });
+  saveCouncils();
+  render();
+}
+function removeCouncil(id) {
+  if (!canDelete(me())) return;
+  S.councils = S.councils.filter(c => c.id !== id);
+  saveCouncils();
+  render();
+}
+function loginView() {
+  return `<div class="card"><h3>تسجيل الدخول</h3><form onsubmit="login(event)">
+    <input name="email" type="email" placeholder="الإيميل" required>
+    <input name="password" type="password" placeholder="كلمة المرور" required>
+    <button>دخول</button></form></div>`;
+}
+
+function registerView() {
+  return `<div class="card"><h3>تفعيل الحساب</h3>
+    <p class="mu">أدخلي الكود الذي استلمتِه من المشرفة، ثم اختاري الإيميل وكلمة المرور.</p>
+    
+    <form onsubmit="register(event)">
+    <input name="code" placeholder="الكود" required>
+    <input name="email" type="email" placeholder="الإيميل" required>
+    <input name="password" type="password" placeholder="كلمة المرور (8 أحرف على الأقل)" required>
+    <button>تفعيل</button></form></div>`;
+}
+
+function newsView() {
+  const n = S.news.find(x => x.id === view.id);
+  if (!n) return `<p>الخبر غير موجود</p>`;
+  return `<div class="card"><h2>${esc(n.title)}</h2>
+    <div class="mu">${fmt(n.created)} — ${esc(n.author)}</div>
+    <p style="white-space:pre-line">${esc(n.body)}</p></div>` + comments("news", n.id);
+}
+
+function pollView() {
+  const p = S.polls.find(x => x.id === view.id);
+  if (!p) return `<p>التصويت غير موجود</p>`;
+  const u = me();
+  const voted = !!u && S.votes.some(v => v.pid === p.id && v.uid === u.id);
+  const total = S.votes.filter(v => v.pid === p.id).length;
+  let h = `<div class="card"><h3>${esc(p.q)}</h3><p class="mu">${p.open ? "التصويت مفتوح" : "التصويت مغلق"}</p>`;
+  if (p.open) {
+    if (!u) h += `<p class="mu">سجّلي دخولك للتصويت</p>`;
+    else if (voted) h += `<p>لقد صوّتِ بالفعل ✔ (النتائج تظهر بعد إغلاق التصويت)</p>`;
+    else h += `<form onsubmit="vote(event,${p.id})">` +
+      p.opts.map(o => `<label><input type="radio" name="opt" value="${o.id}" required> ${esc(o.t)}</label><br>`).join("") +
+      `<button>صوّتي</button></form>`;
+    if (staff(u)) h += `<button onclick="closePoll(${p.id})" style="margin-top:10px">إغلاق التصويت</button>`;
+  } else {
+    h += p.opts.map(o => {
+      const c = S.votes.filter(v => v.oid === o.id).length;
+      const pct = total ? Math.round(c * 100 / total) : 0;
+      return `<p>${esc(o.t)}: <strong>${c}</strong> (${pct}%)</p><div class="bar"><div style="width:${pct}%"></div></div>`;
+    }).join("");
+    h += `<p class="mu">عدد المشاركين: ${total}</p>`;
+  }
+  return h + "</div>" + comments("poll", p.id);
+}
+
+function comments(type, tid) {
+  const u = me();
+  const list = S.comments.filter(c => c.type === type && c.tid === tid);
+  let h = `<div class="card"><h4>التعليقات</h4>`;
+  h += u
+    ? `<form onsubmit="addComment(event,'${type}',${tid})">
+       <textarea name="body" maxlength="500" rows="2" placeholder="اكتبي تعليقك" required></textarea>
+       <button>إضافة تعليق</button></form>`
+    : `<p class="mu"><span class="lnk" onclick="go('login')">سجّلي دخولك</span> للتعليق</p>`;
+  h += list.length
+    ? list.map(c => {
+        const hid = c.hidden && !staff(u);
+        return `<div class="cm"><strong>${esc(c.author)}</strong> <span class="mu">${fmtT(c.created)}</span>
+          <p class="${hid ? "hid" : ""}">${hid ? "[تم إخفاء هذا التعليق من قبل المشرف]" : esc(c.body)}</p>
+          ${u ? `<button class="sm" onclick="report(${c.id})">إبلاغ</button>` : ""}
+          ${staff(u) ? `<button class="sm" onclick="toggleHide(${c.id})">${c.hidden ? "إظهار" : "إخفاء"}</button>
+          <span class="mu">بلاغات: ${c.reports.length}</span>` : ""}
+          </div>`;
+      }).join("")
+    : `<p class="mu">لا توجد تعليقات بعد</p>`;
+  return h + "</div>";
+}
+
+// ---------- الإجراءات ----------
+
+async function sha(t) {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
+}
+async function register(e) {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const code = f.get("code").trim().toUpperCase();
+  const email = f.get("email").trim().toLowerCase();
+  const pw = f.get("password");
+  if (pw.length < 8) return say("كلمة المرور 8 أحرف على الأقل");
+  if (S.users.some(u => u.email === email)) return say("لا يمكن إنشاء الحساب بهذه البيانات");
+  const hc = await sha(code);
+  const inv = S.invites.find(i => i.h === hc && !i.used);
+  if (!inv) return say("الكود غير صالح أو مستخدم");
+  const u = { id: nid(), name: inv.name, role: inv.role, owner: !!inv.owner, email, pw, failed: 0, lock: 0 };
+  S.users.push(u);
+  inv.used = true;
+  S.session = u.id;
+  save();
+  go("home");
+}
+
+function login(e) {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const email = f.get("email").trim().toLowerCase();
+  const pw = f.get("password");
+  const u = S.users.find(x => x.email === email);
+  if (u && u.lock > Date.now()) return say("الحساب مقفل مؤقتاً بسبب محاولات كثيرة، حاولي لاحقاً");
+  if (u && u.pw === pw) { u.failed = 0; u.lock = 0; S.session = u.id; save(); return go("home"); }
+  if (u) {
+    u.failed++;
+    if (u.failed >= 5) { u.lock = Date.now() + 15 * 60000; u.failed = 0; }
+    save();
+  }
+  say("البيانات غير صحيحة");
+}
+
+function logout() { S.session = null; save(); go("home"); }
+
+function postNews(e) {
+  e.preventDefault();
+  if (!staff(me())) return say("غير مسموح");
+  const f = new FormData(e.target);
+  const title = f.get("title").trim().slice(0, 200);
+  const body = f.get("body").trim().slice(0, 5000);
+  if (!title || !body) return say("أدخلي العنوان والمحتوى");
+  S.news.unshift({ id: nid(), title, body, author: me().name, created: new Date().toISOString() });
+  save();
+  go("home");
+}
+
+function createPoll(e) {
+  e.preventDefault();
+  if (!staff(me())) return say("غير مسموح");
+  const f = new FormData(e.target);
+  const q = f.get("question").trim().slice(0, 300);
+  const opts = f.get("options").split("\n").map(s => s.trim()).filter(Boolean).slice(0, 10);
+  if (!q || opts.length < 2) return say("أدخلي سؤالاً وخيارين على الأقل");
+  const id = nid();
+  S.polls.unshift({ id, q, open: true, opts: opts.map(t => ({ id: nid(), t: t.slice(0, 200) })) });
+  save();
+  go("poll", id);
+}
+
+function closePoll(pid) {
+  if (!staff(me())) return say("غير مسموح");
+  const p = S.polls.find(x => x.id === pid);
+  if (p) p.open = false;
+  save();
+  render();
+}
+
+function vote(e, pid) {
+  e.preventDefault();
+  const u = me();
+  if (!u) return say("سجّلي دخولك أولاً");
+  const p = S.polls.find(x => x.id === pid);
+  if (!p || !p.open) return say("التصويت مغلق");
+  const oid = Number(new FormData(e.target).get("opt"));
+  if (!p.opts.some(o => o.id === oid)) return say("اختيار غير صالح");
+  if (S.votes.some(v => v.pid === pid && v.uid === u.id)) return say("لقد صوّتِ بالفعل في هذا التصويت");
+  S.votes.push({ pid, oid, uid: u.id });
+  save();
+  render();
+}
+
+function addComment(e, type, tid) {
+  e.preventDefault();
+  const u = me();
+  if (!u) return say("سجّلي دخولك أولاً");
+  const body = new FormData(e.target).get("body").trim().slice(0, 500);
+  if (!body) return;
+  S.comments.push({ id: nid(), type, tid, body, uid: u.id, author: u.name,
+    created: new Date().toISOString(), hidden: false, reports: [] });
+  save();
+  render();
+}
+
+function report(cid) {
+  const u = me();
+  if (!u) return say("سجّلي دخولك أولاً");
+  const c = S.comments.find(x => x.id === cid);
+  if (c && !c.reports.includes(u.id)) c.reports.push(u.id);
+  save();
+  say("تم إرسال البلاغ، شكراً");
+}
+
+function toggleHide(cid) {
+  if (!staff(me())) return say("غير مسموح");
+  const c = S.comments.find(x => x.id === cid);
+  if (c) c.hidden = !c.hidden;
+  save();
+  render();
+}
+
+function resetDemo() {
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  S = seed();
+  view = { name: "home" };
+  note = "تمت إعادة ضبط البيانات التجريبية";
+  render();
+}
+
+function saveCouncils() {
+  if (!DB) { say("الحفظ المشترك غير متاح الآن"); return; }
+  DB.doc("shared/councils").set({ list: S.councils }).catch(() => say("تعذر الحفظ، حاولي مرة أخرى"));
+}
+async function initShared() {
+  try { DB = await window.claude.use("db"); } catch (e) { DB = null; }
+  if (!DB) return;
+  DB.doc("shared/requests").onSnapshot(snap => {
+    S.requests = snap.exists ? (snap.data().list || []) : [];
+    render();
+  }, () => {});
+  DB.doc("shared/councils").onSnapshot(snap => {
+    S.councils = snap.exists ? (snap.data().list || []) : [];
+    render();
+  }, () => {});
+}
+initShared();
+render();
+</script>
+</body>
+</html>
